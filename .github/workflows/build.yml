@@ -134,7 +134,7 @@ jobs:
               print(f"Fichier NUP prêt : {target}")
           ' "$WORK/game.download" "$GAME_DIR"
 
-      - name: Build iOS IPA from NUP
+      - name: Build iOS IPA from NUP with Auto-Patching
         env:
           PACKAGE_VER: ${{ inputs.package_version }}
           ROMFS_MODE: ${{ inputs.romfs_mode }}
@@ -157,6 +157,17 @@ jobs:
             exit 1
           fi
 
+          # Script de surveillance en arrière-plan pour corriger c1_guard.py à la volée s'il crashe
+          (
+            while true; do
+              if [[ -f "scripts/dm/gfx/tools/c1_guard.py" ]]; then
+                sed -i '' 's/\._m0\[int\(_204\)\]);/._m0[int(_204)]/g' "scripts/dm/gfx/tools/c1_guard.py" 2>/dev/null || true
+              fi
+              sleep 2
+            done
+          ) &
+          MONITOR_PID=$!
+
           CMD=(python3 scripts/build_ipa_from_nsp.py "$NUP_FILE" --allow-other-metal)
 
           if [[ -n "${PACKAGE_VER:-}" ]]; then
@@ -168,7 +179,13 @@ jobs:
           fi
 
           echo "Exécution : ${CMD[*]}"
+          set +e
           "${CMD[@]}"
+          EXIT_CODE=$?
+          set -e
+
+          kill $MONITOR_PID 2>/dev/null || true
+          exit $EXIT_CODE
 
       - name: Collect IPA Artifact
         shell: bash
