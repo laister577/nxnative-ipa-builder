@@ -67,35 +67,11 @@ jobs:
             exit 1
           fi
 
-          python3 -c '
-          import os, re, sys, urllib.parse as u
-
-          url = os.environ["GAME_URL"].strip()
-          token = os.environ.get("GDRIVE_TOKEN", "").strip().replace("\n", "").replace("\r", "")
-
-          p = u.urlparse(url)
-          q = u.parse_qs(p.query)
-          m = re.search(r"/file/d/([^/]+)", p.path)
-          file_id = m.group(1) if m else (q["id"][0] if "id" in q else (url if re.fullmatch(r"[-A-Za-z0-9_]{20,}", url) else None))
-
-          if not file_id:
-              print("::error::ID Google Drive introuvable dans l URL.")
-              sys.exit(1)
-
-          # Configuration du jeton OAuth pour gdown via un fichier de configuration temporaire
-          if token:
-              cred_path = os.path.expanduser("~/.gdrive-credentials.json")
-              # gdown accepte un token d accès direct ou des identifiants oauth
-              print("Configuration du token OAuth pour gdown...")
-          '
-
           file_id="$(python3 -c 'import re, sys, urllib.parse as u; url=sys.argv[1].strip(); p=u.urlparse(url); q=u.parse_qs(p.query); m=re.search(r"/file/d/([^/]+)", p.path); print(m.group(1) if m else (q["id"][0] if "id" in q else url))' "$GAME_URL")"
 
           echo "Lancement du téléchargement robuste via gdown (ID: $file_id)..."
           
-          # Si un token est présent, on l'exporte pour que gdown l'utilise
           if [[ -n "${GDRIVE_TOKEN:-}" ]]; then
-            # Utilisation de gdown avec passage du token d'accès
             python3 -m gdown --id "$file_id" -O "$WORK/game.download" --remaining-ok --token "$GDRIVE_TOKEN" || \
             python3 -m gdown --id "$file_id" -O "$WORK/game.download" --remaining-ok
           else
@@ -188,7 +164,7 @@ jobs:
             exit 1
           fi
 
-          - name: Upload Finished IPA
+      - name: Upload Finished IPA
         uses: actions/upload-artifact@v4
         with:
           name: Ocarina-of-Time-iOS-IPA
