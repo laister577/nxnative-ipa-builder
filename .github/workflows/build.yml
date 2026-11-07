@@ -50,12 +50,11 @@ jobs:
           brew install xcodegen zstd spirv-cross glslang unar
           python -m pip install --upgrade pip
           python -m pip install \
-            lz4 "capstone>=5,<6" fonttools nsz zbic backports.zstd gdown requests
+            lz4 "capstone>=5,<6" fonttools nsz zbic backports.zstd gdown
 
-      - name: Download 24GB NUP via gdown (Authenticated)
+      - name: Download 24GB NUP via gdown
         env:
           GAME_URL: ${{ secrets.Game_URL }}
-          GDRIVE_TOKEN: ${{ secrets.GDRIVE_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
@@ -69,14 +68,8 @@ jobs:
 
           file_id="$(python3 -c 'import re, sys, urllib.parse as u; url=sys.argv[1].strip(); p=u.urlparse(url); q=u.parse_qs(p.query); m=re.search(r"/file/d/([^/]+)", p.path); print(m.group(1) if m else (q["id"][0] if "id" in q else url))' "$GAME_URL")"
 
-          echo "Lancement du téléchargement robuste via gdown (ID: $file_id)..."
-          
-          if [[ -n "${GDRIVE_TOKEN:-}" ]]; then
-            python3 -m gdown --id "$file_id" -O "$WORK/game.download" --remaining-ok --token "$GDRIVE_TOKEN" || \
-            python3 -m gdown --id "$file_id" -O "$WORK/game.download" --remaining-ok
-          else
-            python3 -m gdown --id "$file_id" -O "$WORK/game.download" --remaining-ok
-          fi
+          echo "Téléchargement robuste via gdown (ID: $file_id)..."
+          gdown "$file_id" -O "$WORK/game.download"
 
           if [[ ! -s "$WORK/game.download" ]]; then
             echo "::error::Le fichier téléchargé est vide."
