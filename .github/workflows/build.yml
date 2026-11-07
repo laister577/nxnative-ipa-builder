@@ -50,12 +50,11 @@ jobs:
           brew install xcodegen zstd spirv-cross glslang unar
           python -m pip install --upgrade pip
           python -m pip install \
-            lz4 "capstone>=5,<6" fonttools nsz zbic backports.zstd gdown requests
+            lz4 "capstone>=5,<6" fonttools nsz zbic backports.zstd requests
 
-      - name: Download NUP file from Google Drive (Authenticated)
+      - name: Download NUP file from Google Drive (Direct Stream)
         env:
           GAME_URL: ${{ secrets.Game_URL }}
-          GDRIVE_TOKEN: ${{ secrets.GDRIVE_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
@@ -70,7 +69,6 @@ jobs:
           python3 -c '
           import os, re, sys, urllib.parse as u, requests
           url = os.environ["GAME_URL"].strip()
-          token = os.environ.get("GDRIVE_TOKEN", "").strip()
           
           p = u.urlparse(url)
           q = u.parse_qs(p.query)
@@ -81,19 +79,27 @@ jobs:
               print("::error::ID Google Drive introuvable dans l URL.")
               sys.exit(1)
           
-          print(f"Téléchargement du fichier ID: {file_id}")
-          headers = {"Authorization": f"Bearer {token}"} if token else {}
+          print(f"Téléchargement direct du fichier ID: {file_id}")
+          session = requests.Session()
+          download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
           
-          download_url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
-          response = requests.get(download_url, headers=headers, stream=True)
+          response = session.get(download_url, stream=True)
+          
+          # Gestion de la page de confirmation Google pour les gros fichiers
+          for key, value in response.cookies.items():
+              if key.startswith("download_warning"):
+                  print("Confirmation de téléchargement pour fichier volumineux...")
+                  download_url = f"https://drive.google.com/uc?export=download&confirm={value}&id={file_id}"
+                  response = session.get(download_url, stream=True)
+                  break
           
           if response.status_code != 200:
-              print(f"::error::Erreur API Google Drive ({response.status_code}): {response.text}")
+              print(f"::error::Erreur de téléchargement Google Drive ({response.status_code})")
               sys.exit(1)
               
           output_path = os.path.join(sys.argv[1], "game.download")
           with open(output_path, "wb") as f:
-              for chunk in response.iter_content(chunk_size=8192):
+              for chunk in response.iter_content(chunk_size=32768):
                   if chunk:
                       f.write(chunk)
           print("Téléchargement réussi.")
