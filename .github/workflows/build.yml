@@ -66,8 +66,10 @@ jobs:
             exit 1
           fi
 
-          echo "Téléchargement du fichier depuis Google Drive..."
-          gdown --fuzzy "$GAME_URL" -O "$WORK/game.download"
+          file_id="$(python3 -c 'import re, sys, urllib.parse as u; url=sys.argv[1].strip(); p=u.urlparse(url); q=u.parse_qs(p.query); m=re.search(r"/file/d/([^/]+)", p.path); fid=m.group(1) if m else (q["id"][0] if "id" in q else (url if re.fullmatch(r"[-A-Za-z0-9_]{20,}", url) else None)); sys.exit("ID introuvable") if not fid else print(fid)' "$GAME_URL")"
+
+          echo "Téléchargement du fichier depuis Google Drive (ID: $file_id)..."
+          gdown "$file_id" -O "$WORK/game.download"
 
           if [[ ! -s "$WORK/game.download" ]]; then
             echo "::error::Le fichier téléchargé est vide."
