@@ -55,6 +55,7 @@ jobs:
       - name: Download NUP file from Google Drive
         env:
           GAME_URL: ${{ secrets.Game_URL }}
+          GDRIVE_TOKEN: ${{ secrets.GDRIVE_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
@@ -68,8 +69,16 @@ jobs:
 
           file_id="$(python3 -c 'import re, sys, urllib.parse as u; url=sys.argv[1].strip(); p=u.urlparse(url); q=u.parse_qs(p.query); m=re.search(r"/file/d/([^/]+)", p.path); fid=m.group(1) if m else (q["id"][0] if "id" in q else (url if re.fullmatch(r"[-A-Za-z0-9_]{20,}", url) else None)); sys.exit("ID introuvable") if not fid else print(fid)' "$GAME_URL")"
 
-          echo "Téléchargement du fichier depuis Google Drive (ID: $file_id)..."
-          gdown "$file_id" -O "$WORK/game.download"
+          if [[ -n "${GDRIVE_TOKEN:-}" ]]; then
+            echo "Téléchargement authentifié via l'API Google Drive..."
+            curl -L --fail --retry 3 \
+              -H "Authorization: Bearer $GDRIVE_TOKEN" \
+              "https://www.googleapis.com/drive/v3/files/${file_id}?alt=media" \
+              -o "$WORK/game.download"
+          else
+            echo "Téléchargement standard via gdown..."
+            gdown "$file_id" -O "$WORK/game.download"
+          fi
 
           if [[ ! -s "$WORK/game.download" ]]; then
             echo "::error::Le fichier téléchargé est vide."
