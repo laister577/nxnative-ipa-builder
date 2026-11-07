@@ -50,11 +50,12 @@ jobs:
           brew install xcodegen zstd spirv-cross glslang unar
           python -m pip install --upgrade pip
           python -m pip install \
-            lz4 "capstone>=5,<6" fonttools nsz zbic backports.zstd gdown
+            lz4 "capstone>=5,<6" fonttools nsz zbic backports.zstd requests
 
-      - name: Download 24GB NUP via gdown
+      - name: Download 24GB NUP via Authenticated Google API
         env:
           GAME_URL: ${{ secrets.Game_URL }}
+          GDRIVE_TOKEN: ${{ secrets.GDRIVE_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
@@ -66,10 +67,38 @@ jobs:
             exit 1
           fi
 
-          file_id="$(python3 -c 'import re, sys, urllib.parse as u; url=sys.argv[1].strip(); p=u.urlparse(url); q=u.parse_qs(p.query); m=re.search(r"/file/d/([^/]+)", p.path); print(m.group(1) if m else (q["id"][0] if "id" in q else url))' "$GAME_URL")"
+          python3 -c '
+          import os, re, sys, urllib.parse as u, requests
 
-          echo "Téléchargement robuste via gdown (ID: $file_id)..."
-          gdown "$file_id" -O "$WORK/game.download"
+          url = os.environ["GAME_URL"].strip()
+          token = os.environ.get("GDRIVE_TOKEN", "").strip().replace("\n", "").replace("\r", "")
+
+          p = u.urlparse(url)
+          q = u.parse_qs(p.query)
+          m = re.search(r"/file/d/([^/]+)", p.path)
+          file_id = m.group(1) if m else (q["id"][0] if "id" in q else (url if re.fullmatch(r"[-A-Za-z0-9_]{20,}", url) else None))
+
+          if not file_id:
+              print("::error::ID Google Drive introuvable dans l URL.")
+              sys.exit(1)
+
+          print(f"Téléchargement authentifié du fichier (ID: {file_id})...")
+          headers = {"Authorization": f"Bearer {token}"} if token else {}
+          
+          download_url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
+          response = requests.get(download_url, headers=headers, stream=True)
+
+          if response.status_code != 200:
+              print(f"::error::Erreur API Google Drive ({response.status_code}): {response.text}")
+              sys.exit(1)
+
+          output_path = os.path.join(sys.argv[1], "game.download")
+          with open(output_path, "wb") as f:
+              for chunk in response.iter_content(chunk_size=8*1024*1024):
+                  if chunk:
+                      f.write(chunk)
+          print("Téléchargement complet réussi.")
+          ' "$WORK"
 
           if [[ ! -s "$WORK/game.download" ]]; then
             echo "::error::Le fichier téléchargé est vide."
