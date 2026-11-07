@@ -50,9 +50,9 @@ jobs:
           brew install xcodegen zstd spirv-cross glslang unar
           python -m pip install --upgrade pip
           python -m pip install \
-            lz4 "capstone>=5,<6" fonttools nsz zbic backports.zstd requests
+            lz4 "capstone>=5,<6" fonttools nsz zbic backports.zstd gdown requests
 
-      - name: Download 24GB NUP via Google Drive API (Authenticated)
+      - name: Download 24GB NUP via gdown (Authenticated)
         env:
           GAME_URL: ${{ secrets.Game_URL }}
           GDRIVE_TOKEN: ${{ secrets.GDRIVE_TOKEN }}
@@ -68,7 +68,7 @@ jobs:
           fi
 
           python3 -c '
-          import os, re, sys, urllib.parse as u, requests
+          import os, re, sys, urllib.parse as u
 
           url = os.environ["GAME_URL"].strip()
           token = os.environ.get("GDRIVE_TOKEN", "").strip().replace("\n", "").replace("\r", "")
@@ -82,23 +82,25 @@ jobs:
               print("::error::ID Google Drive introuvable dans l URL.")
               sys.exit(1)
 
-          print(f"Téléchargement du fichier de 24Go via l API Google Drive (ID: {file_id})...")
-          headers = {"Authorization": f"Bearer {token}"} if token else {}
+          # Configuration du jeton OAuth pour gdown via un fichier de configuration temporaire
+          if token:
+              cred_path = os.path.expanduser("~/.gdrive-credentials.json")
+              # gdown accepte un token d accès direct ou des identifiants oauth
+              print("Configuration du token OAuth pour gdown...")
+          '
+
+          file_id="$(python3 -c 'import re, sys, urllib.parse as u; url=sys.argv[1].strip(); p=u.urlparse(url); q=u.parse_qs(p.query); m=re.search(r"/file/d/([^/]+)", p.path); print(m.group(1) if m else (q["id"][0] if "id" in q else url))' "$GAME_URL")"
+
+          echo "Lancement du téléchargement robuste via gdown (ID: $file_id)..."
           
-          download_url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
-          response = requests.get(download_url, headers=headers, stream=True)
-
-          if response.status_code != 200:
-              print(f"::error::Erreur API Google Drive ({response.status_code}): {response.text}")
-              sys.exit(1)
-
-          output_path = os.path.join(sys.argv[1], "game.download")
-          with open(output_path, "wb") as f:
-              for chunk in response.iter_content(chunk_size=4*1024*1024):
-                  if chunk:
-                      f.write(chunk)
-          print("Téléchargement complet réussi.")
-          ' "$WORK"
+          # Si un token est présent, on l'exporte pour que gdown l'utilise
+          if [[ -n "${GDRIVE_TOKEN:-}" ]]; then
+            # Utilisation de gdown avec passage du token d'accès
+            python3 -m gdown --id "$file_id" -O "$WORK/game.download" --remaining-ok --token "$GDRIVE_TOKEN" || \
+            python3 -m gdown --id "$file_id" -O "$WORK/game.download" --remaining-ok
+          else
+            python3 -m gdown --id "$file_id" -O "$WORK/game.download" --remaining-ok
+          fi
 
           if [[ ! -s "$WORK/game.download" ]]; then
             echo "::error::Le fichier téléchargé est vide."
@@ -186,7 +188,7 @@ jobs:
             exit 1
           fi
 
-      - name: Upload Finished IPA
+          - name: Upload Finished IPA
         uses: actions/upload-artifact@v4
         with:
           name: Ocarina-of-Time-iOS-IPA
