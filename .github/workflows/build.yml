@@ -134,11 +134,13 @@ jobs:
               print(f"Fichier NUP prêt : {target}")
           ' "$WORK/game.download" "$GAME_DIR"
 
-      - name: Build iOS IPA from NUP with Auto-Patching
+      - name: Build iOS IPA from NUP with Unicode & Syntax Patches
         env:
           PACKAGE_VER: ${{ inputs.package_version }}
           ROMFS_MODE: ${{ inputs.romfs_mode }}
           ALLOW_OTHER_METAL: "True"
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: "utf-8:surrogateescape"
         shell: bash
         run: |
           set -euo pipefail
@@ -157,7 +159,7 @@ jobs:
             exit 1
           fi
 
-          # Script de surveillance en arrière-plan pour corriger c1_guard.py à la volée s'il crashe
+          # Surveillance en arrière-plan pour corriger c1_guard.py à la volée s'il y a un souci de syntaxe
           (
             while true; do
               if [[ -f "scripts/dm/gfx/tools/c1_guard.py" ]]; then
