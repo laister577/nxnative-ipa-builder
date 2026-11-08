@@ -57,7 +57,8 @@ jobs:
           brew install xcodegen zstd spirv-cross unar
           python -m pip install --upgrade pip
           python -m pip install \
-            lz4 "capstone>=5,<6" fonttools zbic backports.zstd gdown
+            lz4 "capstone>=5,<6" fonttools zbic backports.zstd gdown \
+            google-auth requests
 
       - name: Download game files and keys
         env:
@@ -65,11 +66,62 @@ jobs:
           UPDATE_URL: ${{ secrets.Update_URL }}
           DLC_URL: ${{ secrets.DLC_URL }}
           KEYS_URL: ${{ secrets.Keys_URL }}
+          GDRIVE_CREDENTIALS_JSON: ${{ secrets.GDRIVE_CREDENTIALS_JSON }}
         shell: bash
         run: |
           set -euo pipefail
           WORK="$RUNNER_TEMP/nxnative"
           mkdir -p "$WORK"
+
+          # Authenticated Google Drive downloader (Drive API v3).
+          # Credentials: service-account JSON or authorized-user token.json.
+          cat > "$RUNNER_TEMP/gdrive_dl.py" <<'PY'
+          import json
+          import os
+          import sys
+
+          import requests
+          from google.auth.transport.requests import AuthorizedSession
+          from google.oauth2 import credentials, service_account
+
+          file_id, output = sys.argv[1], sys.argv[2]
+          scopes = ["https://www.googleapis.com/auth/drive.readonly"]
+          raw = os.environ["GDRIVE_CREDENTIALS_JSON"].strip()
+
+          if raw.startswith("ya29."):
+              # Plain OAuth access token (valid ~1 hour)
+              session = requests.Session()
+              session.headers["Authorization"] = "Bearer " + raw
+          else:
+              info = json.loads(raw)
+              if info.get("type") == "service_account":
+                  creds = service_account.Credentials.from_service_account_info(
+                      info, scopes=scopes
+                  )
+              else:
+                  creds = credentials.Credentials.from_authorized_user_info(info)
+              session = AuthorizedSession(creds)
+
+          resp = session.get(
+              f"https://www.googleapis.com/drive/v3/files/{file_id}",
+              params={"alt": "media", "supportsAllDrives": "true"},
+              stream=True,
+              timeout=(30, 300),
+          )
+
+          if resp.status_code != 200:
+              print(f"Drive API error {resp.status_code}: {resp.text[:600]}")
+              sys.exit(1)
+
+          total = 0
+          with open(output, "wb") as f:
+              for chunk in resp.iter_content(chunk_size=8 * 1024 * 1024):
+                  if chunk:
+                      f.write(chunk)
+                      total += len(chunk)
+
+          print(f"Drive API download complete: {total:,} bytes")
+          PY
 
           trim() { printf '%s' "$1" | tr -d '[:space:]"'"'"; }
 
@@ -106,9 +158,24 @@ jobs:
                 echo "::error::Google link detected but no file ID found (host: $host)."
                 exit 1
               fi
-              gdown "$file_id" -O "$output"
+              if [[ -n "${GDRIVE_CREDENTIALS_JSON:-}" ]]; then
+                echo "Using the authenticated Google Drive API..."
+                if ! python -I "$RUNNER_TEMP/gdrive_dl.py" "$file_id" "$output"; then
+                  echo "::warning::Drive API download failed; falling back to gdown."
+                  rm -f "$output"
+                  gdown "$file_id" -O "$output"
+                fi
+              else
+                gdown "$file_id" -O "$output"
+              fi
             elif [[ "$url" =~ $re_bare ]]; then
-              gdown "$url" -O "$output"
+              if [[ -n "${GDRIVE_CREDENTIALS_JSON:-}" ]] \
+                && python -I "$RUNNER_TEMP/gdrive_dl.py" "$url" "$output"; then
+                :
+              else
+                rm -f "$output"
+                gdown "$url" -O "$output"
+              fi
             elif [[ "$url" =~ ^https?:// ]]; then
               curl -L --fail --retry 3 -o "$output" "$url"
             else
