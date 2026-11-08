@@ -102,25 +102,92 @@ jobs:
                   creds = credentials.Credentials.from_authorized_user_info(info)
               session = AuthorizedSession(creds)
 
-          resp = session.get(
-              f"https://www.googleapis.com/drive/v3/files/{file_id}",
-              params={"alt": "media", "supportsAllDrives": "true"},
-              stream=True,
-              timeout=(30, 300),
-          )
+          import time
 
-          if resp.status_code != 200:
-              print(f"Drive API error {resp.status_code}: {resp.text[:600]}")
+          api = f"https://www.googleapis.com/drive/v3/files/{file_id}"
+          common = {"supportsAllDrives": "true"}
+
+          meta = session.get(
+              api, params={**common, "fields": "name,size"}, timeout=60
+          )
+          if meta.status_code != 200:
+              print(f"Drive API metadata error {meta.status_code}: {meta.text[:600]}")
               sys.exit(1)
 
-          total = 0
-          with open(output, "wb") as f:
-              for chunk in resp.iter_content(chunk_size=8 * 1024 * 1024):
-                  if chunk:
-                      f.write(chunk)
-                      total += len(chunk)
+          info_meta = meta.json()
+          size = int(info_meta.get("size", 0))
+          if size <= 0:
+              print("Could not determine the file size from the Drive API.")
+              sys.exit(1)
 
-          print(f"Drive API download complete: {total:,} bytes")
+          print(f"Drive file: {info_meta.get('name')} ({size:,} bytes)")
+
+          pos = 0
+          failures = 0
+          last_print = 0.0
+          start = time.time()
+
+          with open(output, "wb") as f:
+              while pos < size:
+                  progress_before = pos
+                  try:
+                      resp = session.get(
+                          api,
+                          params={**common, "alt": "media"},
+                          headers={"Range": f"bytes={pos}-"},
+                          stream=True,
+                          timeout=(30, 120),
+                      )
+
+                      if resp.status_code == 401:
+                          print("Drive API 401: the access token is invalid or expired.")
+                          sys.exit(1)
+
+                      if resp.status_code not in (200, 206):
+                          raise RuntimeError(
+                              f"HTTP {resp.status_code}: {resp.text[:300]}"
+                          )
+
+                      if resp.status_code == 200 and pos > 0:
+                          # the server ignored Range: restart from zero
+                          f.seek(0)
+                          f.truncate()
+                          pos = 0
+
+                      for chunk in resp.iter_content(chunk_size=8 * 1024 * 1024):
+                          if not chunk:
+                              continue
+                          f.write(chunk)
+                          pos += len(chunk)
+                          now = time.time()
+                          if now - last_print > 15:
+                              last_print = now
+                              speed = pos / max(now - start, 1) / 1e6
+                              print(
+                                  f"  {pos / size * 100:5.1f}%  "
+                                  f"{pos / 1e9:.2f}/{size / 1e9:.2f} GB  "
+                                  f"{speed:.1f} MB/s",
+                                  flush=True,
+                              )
+                  except SystemExit:
+                      raise
+                  except Exception as exc:
+                      print(f"Download interrupted at {pos:,} bytes: {type(exc).__name__}: {str(exc)[:200]}", flush=True)
+
+                  if pos >= size:
+                      break
+
+                  if pos > progress_before:
+                      failures = 0
+                  failures += 1
+                  if failures > 20:
+                      print("Too many consecutive failures; giving up.")
+                      sys.exit(1)
+                  wait = min(60, 5 * failures)
+                  print(f"Resuming from {pos:,} bytes in {wait}s (attempt {failures}/20)...", flush=True)
+                  time.sleep(wait)
+
+          print(f"Drive API download complete: {pos:,} bytes")
           PY
 
           trim() { printf '%s' "$1" | tr -d '[:space:]"'"'"; }
