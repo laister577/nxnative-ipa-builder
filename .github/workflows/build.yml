@@ -22,7 +22,8 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-latest
+    # Standard build needs Xcode 27 (macOS 27 image); the BC fallback keeps macos-latest
+    runs-on: ${{ inputs.device == 'iPhone 15 or older (BC fallback)' && 'macos-latest' || 'xcode-27' }}
     timeout-minutes: 360
 
     steps:
@@ -59,6 +60,33 @@ jobs:
           python -m pip install \
             lz4 "capstone>=5,<6" fonttools zbic backports.zstd gdown \
             google-auth requests
+
+      - name: Select Xcode 27 and install the Metal toolchain
+        if: inputs.device == 'iPhone 15 Pro/Pro Max or newer (standard)'
+        shell: bash
+        run: |
+          set -euo pipefail
+          XC="/Applications/Xcode_27.2.app"
+
+          if [[ ! -d "$XC" ]]; then
+            XC="$(ls -d /Applications/Xcode_27*.app 2>/dev/null | sort -V | tail -1 || true)"
+          fi
+
+          if [[ -z "$XC" || ! -d "$XC" ]]; then
+            echo "::error::No Xcode 27 found on this runner. Installed:"
+            ls -d /Applications/Xcode* || true
+            exit 1
+          fi
+
+          echo "Using $XC"
+          export DEVELOPER_DIR="$XC/Contents/Developer"
+          echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"
+          sudo xcode-select -s "$DEVELOPER_DIR" || true
+
+          sw_vers
+          xcodebuild -version
+          xcodebuild -downloadComponent MetalToolchain
+          xcrun metal --version
 
       - name: Download game files and keys
         env:
